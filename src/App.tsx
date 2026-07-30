@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
-import { Plus, LayoutDashboard, CalendarDays, Sparkles, Menu, X, Settings, Search, Filter, Share2 } from 'lucide-react';
+﻿import { useMemo, useState } from 'react';
+import { Plus, LayoutDashboard, CalendarDays, Menu, X, Settings, Search, Filter, Share2 } from 'lucide-react';
 import { useTasks } from '@/hooks/useTasks';
 import { useSettings } from '@/hooks/useSettings';
+import { useTaskNotifications } from '@/hooks/useTaskNotifications';
 import { supabase, type Task } from '@/lib/supabase';
 import { CATEGORIES, categorize } from '@/lib/categories';
 import Dashboard from '@/components/Dashboard';
@@ -9,12 +10,14 @@ import CalendarView from '@/components/CalendarView';
 import TaskForm from '@/components/TaskForm';
 import SettingsSidebar from '@/components/SettingsSidebar';
 import ShareModal from '@/components/ShareModal';
+import AIAssistant from '@/components/AIAssistant';
 
 type View = 'dashboard' | 'calendar';
 
 export default function App() {
   const { tasks, loading, error, refresh } = useTasks();
   const { settings, save: saveSettings } = useSettings();
+  useTaskNotifications(tasks);
   const [view, setView] = useState<View>('dashboard');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
@@ -23,6 +26,7 @@ export default function App() {
   const [shareOpen, setShareOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState<string>('all');
+  const [calendarDate, setCalendarDate] = useState<string | undefined>(undefined);
 
   const counts = useMemo(() => {
     const c = { urgent: 0, upcoming: 0, other: 0, done: 0 } as Record<string, number>;
@@ -72,8 +76,7 @@ export default function App() {
   function jumpCalendar(date: string) {
     setView('calendar');
     setMenuOpen(false);
-    // CalendarView defaults to today; a selected date will be applied via prop if needed
-    void date;
+    setCalendarDate(date);
   }
 
   const navItems: { key: View; label: string; icon: typeof LayoutDashboard }[] = [
@@ -251,24 +254,14 @@ export default function App() {
             onJumpCalendar={jumpCalendar}
           />
         ) : (
-          <CalendarView tasks={filteredTasks} onToggle={toggle} onEdit={openEdit} onDelete={remove} />
+          <CalendarView tasks={filteredTasks} onToggle={toggle} onEdit={openEdit} onDelete={remove} initialDate={calendarDate} />
         )}
       </main>
 
-      {/* AI assistant placeholder */}
-      <footer className="mx-auto max-w-6xl px-4 pb-10 sm:px-6">
-        <div className="flex items-center gap-3 rounded-2xl border border-dashed border-[#0100ad]/30 bg-[#0100ad]/5 p-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-[#0100ad] shadow-sm">
-            <Sparkles size={18} />
-          </div>
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-slate-800">Assistant IA — bientôt</p>
-            <p className="text-xs text-slate-500">
-              Résumés quotidiens et rappels automatiques. Architecture prête à accueillir cette fonctionnalité.
-            </p>
-          </div>
-        </div>
-      </footer>
+      {/* AI assistant */}
+      <div className="mx-auto max-w-6xl px-4 pb-10 sm:px-6">
+        <AIAssistant tasks={tasks} />
+      </div>
 
       {/* Floating add button (mobile) */}
       <button
@@ -303,3 +296,4 @@ export default function App() {
     </div>
   );
 }
+

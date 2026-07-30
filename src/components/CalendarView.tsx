@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
 import type { Task } from '@/lib/supabase';
 import { toISODate, parseDate, formatLongDate, CATEGORIES, categorize } from '@/lib/categories';
@@ -9,6 +9,7 @@ type Props = {
   onToggle: (t: Task) => void;
   onEdit: (t: Task) => void;
   onDelete: (t: Task) => void;
+  initialDate?: string;
 };
 
 const WEEKDAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -17,12 +18,19 @@ const MONTHS = [
   'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
 ];
 
-export default function CalendarView({ tasks, onToggle, onEdit, onDelete }: Props) {
+export default function CalendarView({ tasks, onToggle, onEdit, onDelete, initialDate }: Props) {
   const [cursor, setCursor] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
   const [selected, setSelected] = useState<string>(toISODate(new Date()));
+
+  useEffect(() => {
+    if (!initialDate) return;
+    const d = parseDate(initialDate);
+    setCursor(new Date(d.getFullYear(), d.getMonth(), 1));
+    setSelected(initialDate);
+  }, [initialDate]);
 
   const byDate = useMemo(() => {
     const map = new Map<string, Task[]>();
