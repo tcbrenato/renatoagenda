@@ -15,6 +15,15 @@ const WEEKDAYS: Record<string, number> = {
   dimanche: 0, lundi: 1, mardi: 2, mercredi: 3, jeudi: 4, vendredi: 5, samedi: 6,
 };
 
+const DAYPART_TIME: Record<string, string> = {
+  matin: '08:00',
+  midi: '12:00',
+  'apres-midi': '15:00',
+  soir: '19:00',
+  soiree: '19:00',
+  nuit: '21:00',
+};
+
 function normalize(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
@@ -25,6 +34,14 @@ function startOfWeek(d: Date): Date {
   s.setDate(d.getDate() - dow);
   s.setHours(0, 0, 0, 0);
   return s;
+}
+
+function nextWeekday(targetDow: number, today: Date): Date {
+  const d = new Date(today);
+  let diff = (targetDow - d.getDay() + 7) % 7;
+  if (diff === 0) diff = 7;
+  d.setDate(d.getDate() + diff);
+  return d;
 }
 
 /** Try to extract a single target ISO date from a free-text French question. Returns null if none found. */
@@ -72,12 +89,7 @@ function extractDate(question: string): string | null {
   const weekdayNames = Object.keys(WEEKDAYS).join('|');
   const wdMatch = normalize(q).match(new RegExp(`\\b(${weekdayNames})\\b`));
   if (wdMatch) {
-    const targetDow = WEEKDAYS[wdMatch[1]];
-    const d = new Date(today);
-    let diff = (targetDow - d.getDay() + 7) % 7;
-    if (diff === 0) diff = 7;
-    d.setDate(d.getDate() + diff);
-    return toISODate(d);
+    return toISODate(nextWeekday(WEEKDAYS[wdMatch[1]], today));
   }
 
   return null;
@@ -107,7 +119,6 @@ function extractRange(question: string): { start: Date; end: Date; label: string
     return { start, end, label: `ce mois-ci (${MONTH_DISPLAY[today.getMonth()]})` };
   }
 
-  // A bare month name, with no day number attached (that case is handled by extractDate already)
   const monthNames = Object.keys(FRENCH_MONTHS).join('|');
   const m = nq.match(new RegExp(`\\b(${monthNames})\\b`));
   if (m && !/\d/.test(nq)) {
@@ -182,14 +193,14 @@ function keywordSearch(question: string, tasks: Task[]): Task[] {
 }
 
 const SMALLTALK: Record<string, string> = {
-  bonjour: 'Bonjour ! Posez-moi une question sur vos programmes (ex. une date, un mois, ou « disponibilités cette semaine »).',
-  salut: 'Salut ! Demandez-moi ce que vous avez de prévu à une date, dans la semaine ou dans le mois.',
-  bonsoir: 'Bonsoir ! Que voulez-vous savoir sur votre agenda ?',
-  coucou: 'Coucou ! Une date, une semaine, un mois — dites-moi ce que vous cherchez.',
-  hello: 'Bonjour ! Demandez-moi une date ou une période et je regarde vos programmes.',
+  bonjour: 'Bonjour ! Posez-moi une question sur vos programmes, ou dites-moi « programme-moi… » pour créer un rendez-vous.',
+  salut: 'Salut ! Demandez-moi ce que vous avez de prévu, ou dites « programme-moi… » pour ajouter un rendez-vous.',
+  bonsoir: 'Bonsoir ! Que voulez-vous savoir ou programmer ?',
+  coucou: 'Coucou ! Une date, une semaine, un mois — ou dites « programme-moi… » pour créer un rendez-vous.',
+  hello: 'Bonjour ! Demandez-moi une date ou dites « programme-moi… » pour créer un rendez-vous.',
   merci: 'Avec plaisir !',
-  ok: 'Je suis là si besoin — posez-moi une question sur vos programmes.',
-  daccord: 'Parfait — dites-moi si vous voulez que je regarde une autre date.',
+  ok: 'Je suis là si besoin.',
+  daccord: 'Parfait — dites-moi si vous voulez que je regarde ou programme autre chose.',
   cava: 'Très bien, merci ! Comment puis-je vous aider avec votre agenda ?',
 };
 
@@ -224,9 +235,119 @@ export function answerQuestion(question: string, tasks: Task[]): string {
     return `J'ai trouvé ${matches.length > 1 ? `${matches.length} tâches` : '1 tâche'} en lien avec votre question :\n${lines}`;
   }
 
-  return "Je n'ai rien trouvé de correspondant. Essayez avec une date (ex. « 15 août »), une période (« cette semaine », « juillet »), ou un mot-clé (lieu, titre, participant).";
+  return "Je n'ai rien trouvé de correspondant. Essayez avec une date (ex. « 15 août »), une période (« cette semaine », « juillet »), un mot-clé, ou « programme-moi… » pour créer un rendez-vous.";
 }
 
 export function dailySummary(tasks: Task[]): string {
   return summarizeTasksForDate(tasks, todayISO());
+}
+
+/* ---------------------------------------------------------------------- */
+/* Création de tâches en langage naturel ("programme-moi ...")            */
+/* ---------------------------------------------------------------------- */
+
+const CREATE_TRIGGER = /^\s*(programme|planifie|planifier|ajoute|ajouter|cr[ée]e|cr[ée]er|organise|organiser|pr[ée]vois|pr[ée]voir|note|noter|mets|mettre|inscris|inscrire)[-\s]*(moi)?\b\s*/i;
+
+function stripCreateTrigger(text: string): string | null {
+  const m = text.match(CREATE_TRIGGER);
+  if (!m) return null;
+  return text.slice(m[0].length);
+}
+
+function parseDateSegment(segment: string, today: Date): { date: string; time: string | null } | null {
+  const nSeg = normalize(segment);
+  const monthNames = Object.keys(FRENCH_MONTHS).join('|');
+  let date: string | null = null;
+
+  const frMatch = nSeg.match(new RegExp(`\\b(\\d{1,2})\\s+(${monthNames})\\s*(\\d{4})?`));
+  if (frMatch) {
+    const day = Number(frMatch[1]);
+    const month = FRENCH_MONTHS[frMatch[2]];
+    const year = frMatch[3] ? Number(frMatch[3]) : today.getFullYear();
+    date = toISODate(new Date(year, month, day));
+  } else {
+    const slash = nSeg.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+    if (slash) {
+      const day = Number(slash[1]);
+      const month = Number(slash[2]) - 1;
+      const year = slash[3] ? (slash[3].length === 2 ? 2000 + Number(slash[3]) : Number(slash[3])) : today.getFullYear();
+      date = toISODate(new Date(year, month, day));
+    } else if (/\bdemain\b/.test(nSeg)) {
+      const d = new Date(today);
+      d.setDate(d.getDate() + 1);
+      date = toISODate(d);
+    } else if (/\baujourd ?hui\b/.test(nSeg)) {
+      date = toISODate(today);
+    } else {
+      const weekdayNames = Object.keys(WEEKDAYS).join('|');
+      const wdMatch = nSeg.match(new RegExp(`\\b(${weekdayNames})\\b`));
+      if (wdMatch) date = toISODate(nextWeekday(WEEKDAYS[wdMatch[1]], today));
+    }
+  }
+  if (!date) return null;
+
+  let time: string | null = null;
+  const explicitTime = segment.match(/\b(\d{1,2})\s*h\s*(\d{2})?\b/i);
+  if (explicitTime) {
+    const hh = explicitTime[1].padStart(2, '0');
+    const mm = (explicitTime[2] ?? '00').padStart(2, '0');
+    time = `${hh}:${mm}`;
+  } else if (/apres[- ]?midi/.test(nSeg)) {
+    time = DAYPART_TIME['apres-midi'];
+  } else {
+    for (const key of ['matin', 'midi', 'soir', 'soiree', 'nuit']) {
+      if (new RegExp(`\\b${key}\\b`).test(nSeg)) {
+        time = DAYPART_TIME[key];
+        break;
+      }
+    }
+  }
+  return { date, time };
+}
+
+export type ParsedCreateCommand = {
+  title: string;
+  entries: { date: string; time: string | null }[];
+};
+
+/** Detects "programme-moi ..." style commands and extracts title + one or more date/time entries. */
+export function parseCreateCommand(text: string, reference: Date = new Date()): ParsedCreateCommand | null {
+  const remainder = stripCreateTrigger(text.trim());
+  if (remainder === null) return null;
+
+  const nRem = normalize(remainder);
+  const monthNames = Object.keys(FRENCH_MONTHS).join('|');
+  const weekdayNames = Object.keys(WEEKDAYS).join('|');
+  const markerRegex = new RegExp(`\\b(${weekdayNames}|${monthNames}|demain|aujourd ?hui|\\d{1,2}\\/\\d{1,2})\\b`);
+  const markerMatch = nRem.match(markerRegex);
+  if (!markerMatch || markerMatch.index === undefined) return null;
+
+  let title = remainder.slice(0, markerMatch.index).trim();
+  title = title.replace(/^(le|la|les|un|une|des|du|de|pour|d')\s+/i, '').trim();
+  title = title.replace(/\s+(le|pour|du)$/i, '').trim();
+  if (!title) title = 'Nouvel événement';
+
+  const datePart = remainder.slice(markerMatch.index);
+  const segments = datePart.split(/\bet\b/i).map((s) => s.trim()).filter(Boolean);
+
+  const entries: { date: string; time: string | null }[] = [];
+  for (const seg of segments) {
+    const parsed = parseDateSegment(seg, reference);
+    if (parsed) entries.push(parsed);
+  }
+  if (entries.length === 0) return null;
+
+  return { title, entries };
+}
+
+export function describeCreatedTasks(title: string, entries: { date: string; time: string | null }[]): string {
+  const lines = entries
+    .map((e) => {
+      const dayLabel = relativeDayLabel(e.date);
+      const dateLabel = formatLongDate(e.date);
+      const timeLabel = e.time ? ` à ${e.time}` : '';
+      return `• ${dayLabel} (${dateLabel})${timeLabel}`;
+    })
+    .join('\n');
+  return `C'est noté ! J'ai programmé « ${title} » :\n${lines}`;
 }

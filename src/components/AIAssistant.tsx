@@ -1,14 +1,20 @@
 ﻿import { FormEvent, useEffect, useRef, useState } from 'react';
-import { Sparkles, Send } from 'lucide-react';
-import type { Task } from '@/lib/supabase';
-import { answerQuestion, dailySummary } from '@/lib/assistant';
+import { Sparkles, Send, Loader2 } from 'lucide-react';
+import { supabase, type Task } from '@/lib/supabase';
+import { answerQuestion, dailySummary, parseCreateCommand, describeCreatedTasks } from '@/lib/assistant';
 
 type ChatMessage = { role: 'user' | 'assistant'; text: string };
 
-export default function AIAssistant({ tasks }: { tasks: Task[] }) {
+type Props = {
+  tasks: Task[];
+  onCreated?: () => void;
+};
+
+export default function AIAssistant({ tasks, onCreated }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [summaryShown, setSummaryShown] = useState(false);
+  const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -21,13 +27,34 @@ export default function AIAssistant({ tasks }: { tasks: Task[] }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const question = input.trim();
-    if (!question) return;
+    if (!question || sending) return;
     setInput('');
+    setMessages((m) => [...m, { role: 'user', text: question }]);
+
+    const command = parseCreateCommand(question);
+    if (command) {
+      setSending(true);
+      const rows = command.entries.map((entry) => ({
+        title: command.title,
+        date: entry.date,
+        time: entry.time,
+      }));
+      const { error } = await supabase.from('tasks').insert(rows);
+      setSending(false);
+      if (error) {
+        setMessages((m) => [...m, { role: 'assistant', text: `Désolé, une erreur est survenue : ${error.message}` }]);
+        return;
+      }
+      setMessages((m) => [...m, { role: 'assistant', text: describeCreatedTasks(command.title, command.entries) }]);
+      onCreated?.();
+      return;
+    }
+
     const answer = answerQuestion(question, tasks);
-    setMessages((m) => [...m, { role: 'user', text: question }, { role: 'assistant', text: answer }]);
+    setMessages((m) => [...m, { role: 'assistant', text: answer }]);
   }
 
   return (
@@ -38,13 +65,15 @@ export default function AIAssistant({ tasks }: { tasks: Task[] }) {
         </div>
         <div>
           <p className="text-sm font-semibold text-slate-800">Assistant</p>
-          <p className="text-xs text-slate-500">Résumé du jour et recherche dans vos programmes</p>
+          <p className="text-xs text-slate-500">Résumé, recherche, et création de rendez-vous ("programme-moi...")</p>
         </div>
       </div>
 
       <div ref={scrollRef} className="max-h-80 space-y-3 overflow-y-auto p-4">
         {messages.length === 0 && (
-          <p className="text-sm text-slate-400">Ajoutez une tâche pour voir apparaître votre résumé du jour.</p>
+          <p className="text-sm text-slate-400">
+            Essayez : « programme-moi un voyage le vendredi soir et samedi 15 août ».
+          </p>
         )}
         {messages.map((m, i) => (
           <div
@@ -58,6 +87,11 @@ export default function AIAssistant({ tasks }: { tasks: Task[] }) {
             {m.text}
           </div>
         ))}
+        {sending && (
+          <div className="mr-auto flex max-w-[90%] items-center gap-2 rounded-2xl bg-slate-100 px-3.5 py-2.5 text-sm text-slate-500">
+            <Loader2 size={14} className="animate-spin" /> Enregistrement…
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-slate-100 p-3">
@@ -65,12 +99,12 @@ export default function AIAssistant({ tasks }: { tasks: Task[] }) {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ex : qu'est-ce que j'ai le 15 août ?"
+          placeholder="Ex : programme-moi un voyage vendredi soir"
           className="flex-1 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-[#0100ad] focus:shadow-[0_0_0_3px_rgba(1,0,173,.1)]"
         />
         <button
           type="submit"
-          disabled={!input.trim()}
+          disabled={!input.trim() || sending}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#0100ad] text-white transition hover:bg-[#0000c8] disabled:opacity-40"
           aria-label="Envoyer"
         >

@@ -260,7 +260,7 @@ export default function App() {
 
       {/* AI assistant */}
       <div className="mx-auto max-w-6xl px-4 pb-10 sm:px-6">
-        <AIAssistant tasks={tasks} />
+        <AIAssistant tasks={tasks} onCreated={refresh} />
       </div>
 
       {/* Floating add button (mobile) */}
