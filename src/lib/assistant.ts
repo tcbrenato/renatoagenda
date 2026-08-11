@@ -254,6 +254,17 @@ function stripCreateTrigger(text: string): string | null {
   return text.slice(m[0].length);
 }
 
+const PARTICIPANTS_REGEX = /\bavec\s+([A-ZÀ-Ý][\wÀ-ÿ'-]*(?:\s+(?:et\s+)?[A-ZÀ-Ý][\wÀ-ÿ'-]*){0,3})/;
+const LOCATION_REGEX = /\b(?:sur|chez|au|à)\s+([A-ZÀ-Ý][\wÀ-ÿ'-]*(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'-]*){0,2})/;
+
+function extractAndStrip(text: string, regex: RegExp): { value: string | null; rest: string } {
+  const m = text.match(regex);
+  if (!m || m.index === undefined) return { value: null, rest: text };
+  const value = m[1].trim();
+  const rest = (text.slice(0, m.index) + ' ' + text.slice(m.index + m[0].length)).replace(/\s+/g, ' ').trim();
+  return { value, rest };
+}
+
 function parseDateSegment(segment: string, today: Date): { date: string; time: string | null } | null {
   const nSeg = normalize(segment);
   const monthNames = Object.keys(FRENCH_MONTHS).join('|');
@@ -307,13 +318,18 @@ function parseDateSegment(segment: string, today: Date): { date: string; time: s
 
 export type ParsedCreateCommand = {
   title: string;
+  location: string | null;
+  participants: string | null;
   entries: { date: string; time: string | null }[];
 };
 
-/** Detects "programme-moi ..." style commands and extracts title + one or more date/time entries. */
+/** Detects "programme-moi ..." style commands and extracts title + location + participants + one or more date/time entries. */
 export function parseCreateCommand(text: string, reference: Date = new Date()): ParsedCreateCommand | null {
-  const remainder = stripCreateTrigger(text.trim());
-  if (remainder === null) return null;
+  const stripped = stripCreateTrigger(text.trim());
+  if (stripped === null) return null;
+
+  const { value: participants, rest: afterParticipants } = extractAndStrip(stripped, PARTICIPANTS_REGEX);
+  const { value: location, rest: remainder } = extractAndStrip(afterParticipants, LOCATION_REGEX);
 
   const nRem = normalize(remainder);
   const monthNames = Object.keys(FRENCH_MONTHS).join('|');
@@ -337,10 +353,18 @@ export function parseCreateCommand(text: string, reference: Date = new Date()): 
   }
   if (entries.length === 0) return null;
 
-  return { title, entries };
+  return { title, location, participants, entries };
 }
 
-export function describeCreatedTasks(title: string, entries: { date: string; time: string | null }[]): string {
+export function describeCreatedTasks(
+  title: string,
+  entries: { date: string; time: string | null }[],
+  location: string | null,
+  participants: string | null,
+): string {
+  const extras = [location ? `à ${location}` : null, participants ? `avec ${participants}` : null]
+    .filter(Boolean)
+    .join(' · ');
   const lines = entries
     .map((e) => {
       const dayLabel = relativeDayLabel(e.date);
@@ -349,5 +373,5 @@ export function describeCreatedTasks(title: string, entries: { date: string; tim
       return `• ${dayLabel} (${dateLabel})${timeLabel}`;
     })
     .join('\n');
-  return `C'est noté ! J'ai programmé « ${title} » :\n${lines}`;
+  return `C'est noté ! J'ai programmé « ${title} »${extras ? ` (${extras})` : ''} :\n${lines}`;
 }
